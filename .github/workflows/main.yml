@@ -1,4 +1,4 @@
-name: Sync Google Drive to GitHub Release (Unrar + Subs)
+name: Sync Google Drive to GitHub Release (Unrar + Auto Sub)
 
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Install dependencies
+      - name: Install deps (unrar, ffmpeg, whisper)
         run: |
           sudo apt-get update
           sudo apt-get install -y unrar ffmpeg python3-pip
@@ -60,26 +60,21 @@ jobs:
           mkdir extracted
           unrar x "${{ env.FILENAME }}" extracted/
 
-      - name: Generate English subtitles (Whisper)
+      - name: Generate Japanese subtitles with Whisper
         run: |
           mkdir subs
-          for f in extracted/*.mp4; do
-            size=$(stat -c%s "$f")
-            if [ $size -lt 2000000000 ]; then   # skip file >2GB (GitHub Release limit)
-              echo "🎬 Processing $f"
-              whisper "$f" --model small --language ja --output_format srt --output_dir subs/
-            else
-              echo "⚠️ Skipping $f (too large: $size bytes)"
-            fi
+          for f in extracted/**/*.mp4; do
+            echo "🎬 Processing $f"
+            whisper "$f" --model small --language ja --output_format srt --output_dir subs/
           done
 
-      - name: Upload MP4 + Subtitles to GitHub Release
+      - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "drive-sync-subs"
-          name: "Google Drive Sync (With JP→EN Subs)"
+          tag_name: "drive-sync"
+          name: "Google Drive Sync with Subtitles"
           files: |
-            extracted/*.mp4
+            extracted/**/*.mp4
             subs/*.srt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
