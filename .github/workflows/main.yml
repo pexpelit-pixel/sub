@@ -1,0 +1,85 @@
+name: Sync Google Drive to GitHub Release (Unrar + Subs)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unrar ffmpeg python3-pip
+          pip install git+https://github.com/openai/whisper.git
+
+      - name: Download file from Google Drive (Python, support big file)
+        run: |
+          python3 - << 'EOF'
+          import requests, re
+
+          file_id = "1iesAem2bw04xDwcJUAye3ybrsgC0cznP"
+          URL = f"https://drive.usercontent.google.com/download?id={file_id}&export=download"
+
+          session = requests.Session()
+          resp = session.get(URL, allow_redirects=True)
+
+          if "text/html" in resp.headers.get("Content-Type", ""):
+              match = re.search(r'name="confirm" value="([^"]+)"', resp.text)
+              confirm = match.group(1) if match else "t"
+              URL = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm={confirm}"
+              resp = session.get(URL, allow_redirects=True)
+
+          if "Content-Disposition" in resp.headers:
+              dispo = resp.headers["Content-Disposition"]
+              filename = dispo.split("filename=")[1].strip('"')
+          else:
+              filename = "downloaded_file.rar"
+
+          with open(filename, "wb") as f:
+              f.write(resp.content)
+
+          print(filename, file=open("filename.txt", "w"))
+          EOF
+
+      - name: Get filename
+        id: vars
+        run: echo "FILENAME=$(cat filename.txt)" >> $GITHUB_ENV
+
+      - name: Extract RAR
+        run: |
+          mkdir extracted
+          unrar x "${{ env.FILENAME }}" extracted/
+
+      - name: Generate English subtitles (Whisper)
+        run: |
+          mkdir subs
+          for f in extracted/*.mp4; do
+            size=$(stat -c%s "$f")
+            if [ $size -lt 2000000000 ]; then   # skip file >2GB (GitHub Release limit)
+              echo "🎬 Processing $f"
+              whisper "$f" --model small --language ja --output_format srt --output_dir subs/
+            else
+              echo "⚠️ Skipping $f (too large: $size bytes)"
+            fi
+          done
+
+      - name: Upload MP4 + Subtitles to GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "drive-sync-subs"
+          name: "Google Drive Sync (With JP→EN Subs)"
+          files: |
+            extracted/*.mp4
+            subs/*.srt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
