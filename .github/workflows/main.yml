@@ -56,7 +56,7 @@ jobs:
                 ],
                 "response_format": "verbose_json"
               }
-            EOF
+         EOF
 
             echo "📄 Convert translation → SRT..."
             python3 transcribe.py "${base}_en.json" "subs/${base}.en.srt"
