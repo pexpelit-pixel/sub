@@ -46,67 +46,25 @@ jobs:
               -F "response_format=verbose_json" \
               -o "${base}.json"
 
-            # Convert JSON → SRT
-            python3 <<-'EOF'
-            import json, srt, sys
-            from datetime import timedelta
-
-            base = sys.argv[1]
-            data = json.load(open(f"{base}.json"))
-            segments = []
-            idx = 1
-            for seg in data.get("segments", []):
-                start = timedelta(seconds=seg["start"])
-                end = timedelta(seconds=seg["end"])
-                text = seg["text"].strip()
-                segments.append(srt.Subtitle(index=idx, start=start, end=end, content=text))
-                idx += 1
-            with open(f"{base}.srt", "w", encoding="utf-8") as f:
-                f.write(srt.compose(segments))
-            EOF $base
+            # Convert JSON → SRT (call python script separately)
+            python3 convert_json_to_srt.py "$base"
 
             # Translate SRT Jepang → Inggris
-            cat > payload.json <<-'EOF'
-            {
-              "model": "gpt-oss-20b",
-              "messages": [
-                {
-                  "role": "system",
-                  "content": "You are a professional translator. Translate Japanese SRT into natural English, keep the timing structure."
-                },
-                {
-                  "role": "user",
-                  "content": "Translate this subtitle file block by block:\n\n" 
-                }
-              ],
-              "response_format": "verbose_json"
-            }
-            EOF
-
-            # Append SRT text ke payload
-            body=$(jq -Rs '.' < "${base}.srt")
-            jq ".messages[1].content += $body" payload.json > payload2.json
+            jq -Rs '{model:"gpt-oss-20b",messages:[{role:"system",content:"You are a professional translator. Translate Japanese SRT into natural English, keep the timing structure."},{role:"user",content:.}]}' "${base}.srt" > payload.json
 
             curl -s "https://api.groq.com/openai/v1/chat/completions" \
               -H "Authorization: Bearer ${{ secrets.GROQ_API_KEY }}" \
               -H "Content-Type: application/json" \
-              -d @payload2.json \
+              -d @payload.json \
               -o "${base}_en.json"
 
-            # Extract English text back ke .srt
-            python3 <<-'EOF'
-            import json, re, sys
-            base = sys.argv[1]
-            out = json.load(open(f"{base}_en.json"))
-            text = out["choices"][0]["message"]["content"]
-            with open(f"{base}_en.srt", "w", encoding="utf-8") as f:
-                f.write(text)
-            EOF $base
+            python3 extract_translation.py "$base"
 
             # Hardcode subtitle Inggris ke video
             ffmpeg -y -i "$base.mp4" -vf "subtitles=${base}_en.srt:force_style='Alignment=2,Fontsize=20'" -c:a copy "outputs/${base}_sub.mp4"
 
           done < video.txt
+
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
