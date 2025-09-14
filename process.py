@@ -1,8 +1,20 @@
-import os, sys, json, subprocess, requests, srt
+import os, sys, json, subprocess, requests, srt, shutil
 from datetime import timedelta
 
 API_KEY = "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"
 HEADERS = {"Authorization": f"Bearer {API_KEY}"}
+
+def get_ffmpeg_path():
+    # Cari ffmpeg di PATH
+    path = shutil.which("ffmpeg")
+    if path:
+        return path
+    # fallback ke lokasi manual
+    if os.path.exists("/usr/local/bin/ffmpeg"):
+        return "/usr/local/bin/ffmpeg"
+    raise FileNotFoundError("❌ ffmpeg tidak ditemukan di PATH atau /usr/local/bin")
+
+FFMPEG = get_ffmpeg_path()
 
 def run(cmd):
     print(">", " ".join(cmd))
@@ -12,8 +24,8 @@ def download_video(url, out):
     run(["curl", "-L", url, "-o", out])
 
 def extract_audio(video, out_wav, out_mp3):
-    run(["ffmpeg", "-y", "-i", video, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", out_wav])
-    run(["ffmpeg", "-y", "-i", out_wav, "-b:a", "64k", out_mp3])
+    run([FFMPEG, "-y", "-i", video, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", out_wav])
+    run([FFMPEG, "-y", "-i", out_wav, "-b:a", "64k", out_mp3])
 
 def whisper_transcribe(audio, out_json):
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -57,7 +69,7 @@ def translate_srt(in_srt, out_srt):
 
 def hardcode_sub(video, srtfile, outmp4):
     run([
-        "ffmpeg","-y","-i",video,
+        FFMPEG,"-y","-i",video,
         "-vf",f"subtitles={srtfile}:force_style='Alignment=2,Fontsize=20'",
         "-c:a","copy", outmp4
     ])
