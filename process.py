@@ -27,8 +27,8 @@ def extract_audio(video, out_wav, out_mp3):
     run([FFMPEG, "-y", "-i", out_wav, "-b:a", "64k", out_mp3])
 
 def whisper_transcribe(audio, out_json):
-    url = "https://api.groq.com/openai/v1/audio/transcriptions"
     import requests
+    url = "https://api.groq.com/openai/v1/audio/transcriptions"
     with open(audio, "rb") as f:
         r = requests.post(url,
                           headers={"Authorization": f"Bearer {API_KEY}"},
@@ -51,30 +51,57 @@ def json_to_srt(json_file, out_srt):
     with open(out_srt, "w", encoding="utf-8") as f:
         f.write(srt.compose(subs))
 
+# ===================== chunk split translate =====================
+def chunk_text(text, max_tokens=5000):
+    """
+    Split text into chunks safely under max_tokens (approx)
+    """
+    lines = text.splitlines()
+    chunks = []
+    current = []
+    tokens = 0
+    for line in lines:
+        line_tokens = len(line.split())  # rough token approx
+        if tokens + line_tokens > max_tokens and current:
+            chunks.append("\n".join(current))
+            current = []
+            tokens = 0
+        current.append(line)
+        tokens += line_tokens
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
 def translate_srt(in_srt, out_srt):
     text = open(in_srt, encoding="utf-8").read()
-    completion = client.chat.completions.create(
-        model="llama-3.1-8b-instant",  # ✅ full 8B Instant model
-        messages=[
-            {"role": "system", "content": "Translate Japanese subtitles to natural English. Keep exact SRT format (indexes, timestamps)."},
-            {"role": "user", "content": text}
-        ],
-        temperature=0.7,
-        max_completion_tokens=8192,
-        top_p=1,
-        stream=True
-    )
+    chunks = chunk_text(text, max_tokens=5000)
+    translated_chunks = []
 
-    translated = []
-    for chunk in completion:
-        if chunk.choices[0].delta.content:
-            translated.append(chunk.choices[0].delta.content)
+    for i, chunk in enumerate(chunks, start=1):
+        print(f"🔹 Translating chunk {i}/{len(chunks)}...")
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "Translate Japanese subtitles to natural English. Keep exact SRT format (indexes, timestamps)."},
+                {"role": "user", "content": chunk}
+            ],
+            temperature=0.7,
+            max_completion_tokens=8192,
+            top_p=1,
+            stream=True
+        )
+        translated = []
+        for delta in completion:
+            if delta.choices[0].delta.content:
+                translated.append(delta.choices[0].delta.content)
+        translated_chunks.append("".join(translated))
 
-    result_text = "".join(translated)
-
+    # gabungkan semua chunk
+    result_text = "\n".join(translated_chunks)
     with open(out_srt, "w", encoding="utf-8") as f:
         f.write(result_text)
 
+# ===================== hardcode & upload =====================
 def hardcode_sub(video, srtfile, outmp4):
     srt_path = os.path.abspath(srtfile).replace(":", "\\:")
     run([
