@@ -5,14 +5,12 @@ API_KEY = "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"
 HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
 def get_ffmpeg_path():
-    # Cari ffmpeg di PATH
     path = shutil.which("ffmpeg")
     if path:
         return path
-    # fallback ke lokasi manual
     if os.path.exists("/usr/local/bin/ffmpeg"):
         return "/usr/local/bin/ffmpeg"
-    raise FileNotFoundError("❌ ffmpeg tidak ditemukan di PATH atau /usr/local/bin")
+    raise FileNotFoundError("❌ ffmpeg tidak ditemukan")
 
 FFMPEG = get_ffmpeg_path()
 
@@ -53,24 +51,36 @@ def json_to_srt(json_file, out_srt):
 def translate_srt(in_srt, out_srt):
     url = "https://api.groq.com/openai/v1/chat/completions"
     text = open(in_srt, encoding="utf-8").read()
+
     payload = {
-        "model": "gpt-oss-20b",
+        "model": "gpt-oss-20b",  # default
         "messages": [
-            {"role": "system", "content": "Translate Japanese subtitles to natural English, keeping exact SRT format (indexes, timestamps)."},
+            {"role": "system", "content": "Translate Japanese subtitles to fluent English. Keep exact SRT format (indexes, timestamps)."},
             {"role": "user", "content": text}
-        ]
+        ],
+        "temperature": 0.7,
+        "max_tokens": 8192
     }
+
     r = requests.post(url, headers={**HEADERS, "Content-Type":"application/json"}, json=payload)
+
+    if r.status_code == 404:  # fallback kalau model tidak ada
+        print("⚠️ gpt-oss-20b tidak tersedia, fallback ke llama3-70b-8192")
+        payload["model"] = "llama3-70b-8192"
+        r = requests.post(url, headers={**HEADERS, "Content-Type":"application/json"}, json=payload)
+
     r.raise_for_status()
     result = r.json()
     translated = result["choices"][0]["message"]["content"]
+
     with open(out_srt, "w", encoding="utf-8") as f:
         f.write(translated)
 
 def hardcode_sub(video, srtfile, outmp4):
+    srt_path = os.path.abspath(srtfile).replace(":", "\\:")
     run([
         FFMPEG,"-y","-i",video,
-        "-vf",f"subtitles={srtfile}:force_style='Alignment=2,Fontsize=20'",
+        "-vf",f"subtitles={srt_path}:force_style='Alignment=2,Fontsize=20'",
         "-c:a","copy", outmp4
     ])
 
@@ -99,7 +109,6 @@ def process_video(url):
     translate_srt(jpn_srt, eng_srt)
     hardcode_sub(mp4, eng_srt, outmp4)
 
-    # Upload hasil ke Catbox
     link = upload_catbox(outmp4)
     print(f"✅ Uploaded: {link}")
 
