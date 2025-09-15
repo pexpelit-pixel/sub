@@ -54,7 +54,7 @@ def json_to_srt(json_file, out_srt):
 def translate_srt(in_srt, out_srt):
     text = open(in_srt, encoding="utf-8").read()
     completion = client.chat.completions.create(
-        model="openai/gpt-oss-120b",  # versi terbaru besar
+        model="openai/gpt-oss-20b",  # versi terbaru besar
         messages=[
             {"role": "system", "content": "Translate Japanese subtitles to natural English. Keep exact SRT format (indexes, timestamps)."},
             {"role": "user", "content": text}
@@ -74,7 +74,7 @@ def translate_srt(in_srt, out_srt):
     result_text = "".join(translated)
 
     with open(out_srt, "w", encoding="utf-8") as f:
-        f.write(result_text)
+     f.write(result_text)
 
 def hardcode_sub(video, srtfile, outmp4):
     srt_path = os.path.abspath(srtfile).replace(":", "\\:")
