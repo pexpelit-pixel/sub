@@ -51,55 +51,37 @@ def json_to_srt(json_file, out_srt):
     with open(out_srt, "w", encoding="utf-8") as f:
         f.write(srt.compose(subs))
 
-# ===================== chunk split translate =====================
-def chunk_text(text, max_tokens=5000):
-    """
-    Split text into chunks safely under max_tokens (approx)
-    """
-    lines = text.splitlines()
-    chunks = []
-    current = []
-    tokens = 0
-    for line in lines:
-        line_tokens = len(line.split())  # rough token approx
-        if tokens + line_tokens > max_tokens and current:
-            chunks.append("\n".join(current))
-            current = []
-            tokens = 0
-        current.append(line)
-        tokens += line_tokens
-    if current:
-        chunks.append("\n".join(current))
-    return chunks
-
+# ===================== block-by-block translate =====================
 def translate_srt(in_srt, out_srt):
-    text = open(in_srt, encoding="utf-8").read()
-    chunks = chunk_text(text, max_tokens=5000)
-    translated_chunks = []
+    subs = list(srt.parse(open(in_srt, encoding="utf-8").read()))
+    translated_subs = []
 
-    for i, chunk in enumerate(chunks, start=1):
-        print(f"🔹 Translating chunk {i}/{len(chunks)}...")
+    for i, sub in enumerate(subs, start=1):
+        content = sub.content
         completion = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "Translate Japanese subtitles to natural English. Keep exact SRT format (indexes, timestamps)."},
-                {"role": "user", "content": chunk}
+                {"role": "system", "content": "Translate Japanese subtitle text to natural English."},
+                {"role": "user", "content": content}
             ],
             temperature=0.7,
-            max_completion_tokens=8192,
+            max_completion_tokens=512,
             top_p=1,
             stream=True
         )
-        translated = []
+
+        translated_text = []
         for delta in completion:
             if delta.choices[0].delta.content:
-                translated.append(delta.choices[0].delta.content)
-        translated_chunks.append("".join(translated))
+                translated_text.append(delta.choices[0].delta.content)
+        sub.content = "".join(translated_text).strip()
+        translated_subs.append(sub)
 
-    # gabungkan semua chunk
-    result_text = "\n".join(translated_chunks)
+        if i % 10 == 0:
+            print(f"🔹 Translated {i}/{len(subs)} subtitles...")
+
     with open(out_srt, "w", encoding="utf-8") as f:
-        f.write(result_text)
+        f.write(srt.compose(translated_subs))
 
 # ===================== hardcode & upload =====================
 def hardcode_sub(video, srtfile, outmp4):
