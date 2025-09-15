@@ -1,76 +1,39 @@
-name: Auto Subbing Anime
+name: Run Video Subtitle Processing
 
 on:
-  workflow_dispatch:
-  push:
-    paths:
-      - "video.txt"
-
-permissions:
-  contents: write
+  workflow_dispatch: # bisa dijalankan manual
 
 jobs:
-  subbing:
+  run_process:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Install deps
+      - name: Install system dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg jq curl python3 python3-pip
-          pip install srt
+          sudo apt update
+          sudo apt install -y python3 python3-pip curl xz-utils
 
-      - name: Process each video
+      - name: Install FFmpeg static
         run: |
-          mkdir -p outputs subs
-          while read url; do
-            [ -z "$url" ] && continue
-            base=$(basename "$url" .mp4)
+          curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -o ffmpeg.tar.xz
+          tar -xf ffmpeg.tar.xz
+          cd ffmpeg-*-amd64-static
+          sudo mv ffmpeg /usr/local/bin/
+          sudo mv ffprobe /usr/local/bin/
+          ffmpeg -version
 
-            echo "🎬 Processing $base ..."
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install requests srt googletrans==4.0.0-rc1 groq
 
-            # Download video
-            curl -L "$url" -o "$base.mp4"
+      - name: Download process.py and video.txt
+        run: |
+          curl -L -o process.py https://raw.githubusercontent.com/pexpelit-pixel/sub/refs/heads/main/process.py
+          curl -L -o video.txt https://raw.githubusercontent.com/pexpelit-pixel/sub/refs/heads/main/video.txt
 
-            # Extract + compress audio (<25MB)
-            ffmpeg -y -i "$base.mp4" -vn -ar 16000 -ac 1 -c:a pcm_s16le "${base}.wav"
-            ffmpeg -y -i "${base}.wav" -b:a 64k "${base}_c.mp3"
-
-            # Whisper API (Japanese transcription)
-            curl -s "https://api.groq.com/openai/v1/audio/transcriptions" \
-              -H "Authorization: Bearer ${{ secrets.GROQ_API_KEY }}" \
-              -F "model=whisper-large-v3-turbo" \
-              -F "file=@${base}_c.mp3" \
-              -F "response_format=verbose_json" \
-              -o "${base}.json"
-
-            # Convert JSON → SRT (call python script separately)
-            python3 convert_json_to_srt.py "$base"
-
-            # Translate SRT Jepang → Inggris
-            jq -Rs '{model:"gpt-oss-20b",messages:[{role:"system",content:"You are a professional translator. Translate Japanese SRT into natural English, keep the timing structure."},{role:"user",content:.}]}' "${base}.srt" > payload.json
-
-            curl -s "https://api.groq.com/openai/v1/chat/completions" \
-              -H "Authorization: Bearer ${{ secrets.GROQ_API_KEY }}" \
-              -H "Content-Type: application/json" \
-              -d @payload.json \
-              -o "${base}_en.json"
-
-            python3 extract_translation.py "$base"
-
-            # Hardcode subtitle Inggris ke video
-            ffmpeg -y -i "$base.mp4" -vf "subtitles=${base}_en.srt:force_style='Alignment=2,Fontsize=20'" -c:a copy "outputs/${base}_sub.mp4"
-
-          done < video.txt
-
-
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: "auto-subbing"
-          name: "Auto Subbed Videos"
-          files: outputs/**
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run process.py
+        run: |
+          python3 process.py video.txt
