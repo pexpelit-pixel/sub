@@ -60,7 +60,7 @@ def translate_srt(in_srt, out_srt):
             {"role": "user", "content": text}
         ],
         temperature=0.7,
-        max_completion_tokens=8192,
+        max_completion_tokens=4096,
         top_p=1,
         reasoning_effort="medium",
         stream=True
