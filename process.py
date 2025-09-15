@@ -1,8 +1,9 @@
-import os, sys, json, subprocess, requests, srt, shutil
+import os, sys, json, subprocess, srt, shutil
 from datetime import timedelta
+from groq import Groq  # pip install groq
 
 API_KEY = "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"
-HEADERS = {"Authorization": f"Bearer {API_KEY}"}
+client = Groq(api_key=API_KEY)
 
 def get_ffmpeg_path():
     path = shutil.which("ffmpeg")
@@ -27,10 +28,12 @@ def extract_audio(video, out_wav, out_mp3):
 
 def whisper_transcribe(audio, out_json):
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
+    import requests
     with open(audio, "rb") as f:
-        r = requests.post(url, headers=HEADERS, files={
-            "file": (os.path.basename(audio), f, "audio/mpeg")
-        }, data={"model":"whisper-large-v3-turbo","response_format":"verbose_json"})
+        r = requests.post(url,
+                          headers={"Authorization": f"Bearer {API_KEY}"},
+                          files={"file": (os.path.basename(audio), f, "audio/mpeg")},
+                          data={"model": "whisper-large-v3-turbo", "response_format": "verbose_json"})
     r.raise_for_status()
     with open(out_json, "w", encoding="utf-8") as f:
         f.write(r.text)
@@ -49,32 +52,29 @@ def json_to_srt(json_file, out_srt):
         f.write(srt.compose(subs))
 
 def translate_srt(in_srt, out_srt):
-    url = "https://api.groq.com/openai/v1/chat/completions"
     text = open(in_srt, encoding="utf-8").read()
-
-    payload = {
-        "model": "gpt-oss-20b",  # default
-        "messages": [
-            {"role": "system", "content": "Translate Japanese subtitles to fluent English. Keep exact SRT format (indexes, timestamps)."},
+    completion = client.chat.completions.create(
+        model="openai/gpt-oss-120b",  # versi terbaru besar
+        messages=[
+            {"role": "system", "content": "Translate Japanese subtitles to natural English. Keep exact SRT format (indexes, timestamps)."},
             {"role": "user", "content": text}
         ],
-        "temperature": 0.7,
-        "max_tokens": 8192
-    }
+        temperature=0.7,
+        max_completion_tokens=8192,
+        top_p=1,
+        reasoning_effort="medium",
+        stream=True
+    )
 
-    r = requests.post(url, headers={**HEADERS, "Content-Type":"application/json"}, json=payload)
+    translated = []
+    for chunk in completion:
+        if chunk.choices[0].delta.content:
+            translated.append(chunk.choices[0].delta.content)
 
-    if r.status_code == 404:  # fallback kalau model tidak ada
-        print("⚠️ gpt-oss-20b tidak tersedia, fallback ke llama3-70b-8192")
-        payload["model"] = "llama3-70b-8192"
-        r = requests.post(url, headers={**HEADERS, "Content-Type":"application/json"}, json=payload)
-
-    r.raise_for_status()
-    result = r.json()
-    translated = result["choices"][0]["message"]["content"]
+    result_text = "".join(translated)
 
     with open(out_srt, "w", encoding="utf-8") as f:
-        f.write(translated)
+        f.write(result_text)
 
 def hardcode_sub(video, srtfile, outmp4):
     srt_path = os.path.abspath(srtfile).replace(":", "\\:")
@@ -85,6 +85,7 @@ def hardcode_sub(video, srtfile, outmp4):
     ])
 
 def upload_catbox(file):
+    import requests
     url = "https://catbox.moe/user/api.php"
     with open(file, "rb") as f:
         r = requests.post(url, data={"reqtype":"fileupload"}, files={"fileToUpload":f})
