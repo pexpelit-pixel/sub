@@ -27,7 +27,9 @@ jobs:
       - name: Install Python dependencies
         run: |
           python3 -m pip install --upgrade pip
-          pip install requests srt googletrans==4.0.0-rc1 groq
+          pip install groq
+          pip install requests
+          pip install srt
 
       - name: Download process.py and video.txt
         run: |
