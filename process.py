@@ -3,9 +3,10 @@ from datetime import timedelta
 from groq import Groq  # pip install groq
 from googletrans import Translator  # pip install googletrans==4.0.0-rc1
 
-# ===================== API Key Groq =====================
+# ===================== API =====================
 API_KEY = "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"
 client = Groq(api_key=API_KEY)
+translator = Translator()
 
 # ===================== FFMPEG =====================
 def get_ffmpeg_path():
@@ -22,6 +23,7 @@ def run(cmd):
     print(">", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
+# ===================== Download & Extract =====================
 def download_video(url, out):
     run(["curl", "-L", url, "-o", out])
 
@@ -29,19 +31,22 @@ def extract_audio(video, out_wav, out_mp3):
     run([FFMPEG, "-y", "-i", video, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", out_wav])
     run([FFMPEG, "-y", "-i", out_wav, "-b:a", "64k", out_mp3])
 
-# ===================== WHISPER =====================
+# ===================== Whisper (Groq) =====================
 def whisper_transcribe(audio, out_json):
     import requests
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
     with open(audio, "rb") as f:
-        r = requests.post(url,
-                          headers={"Authorization": f"Bearer {API_KEY}"},
-                          files={"file": (os.path.basename(audio), f, "audio/mpeg")},
-                          data={"model": "whisper-large-v3-turbo", "response_format": "verbose_json"})
+        r = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            files={"file": (os.path.basename(audio), f, "audio/mpeg")},
+            data={"model": "whisper-large-v3-turbo", "response_format": "verbose_json"}
+        )
     r.raise_for_status()
     with open(out_json, "w", encoding="utf-8") as f:
         f.write(r.text)
 
+# ===================== JSON → SRT =====================
 def json_to_srt(json_file, out_srt):
     data = json.load(open(json_file))
     subs = []
@@ -55,16 +60,17 @@ def json_to_srt(json_file, out_srt):
     with open(out_srt, "w", encoding="utf-8") as f:
         f.write(srt.compose(subs))
 
-# ===================== Google Translate block-by-block =====================
+# ===================== Google Translate =====================
 def translate_srt(in_srt, out_srt):
-    translator = Translator()
     subs = list(srt.parse(open(in_srt, encoding="utf-8").read()))
     translated_subs = []
 
     for i, sub in enumerate(subs, start=1):
-        # Translate block by block
-        translated_text = translator.translate(sub.content, src='ja', dest='en').text
-        sub.content = translated_text.strip()
+        try:
+            result = translator.translate(sub.content, src='ja', dest='en')
+            sub.content = result.text
+        except Exception as e:
+            print(f"⚠️ Error at line {i}: {e}")
         translated_subs.append(sub)
 
         if i % 10 == 0:
@@ -73,7 +79,7 @@ def translate_srt(in_srt, out_srt):
     with open(out_srt, "w", encoding="utf-8") as f:
         f.write(srt.compose(translated_subs))
 
-# ===================== Hardcode & Upload =====================
+# ===================== Hardcode Subtitle =====================
 def hardcode_sub(video, srtfile, outmp4):
     srt_path = os.path.abspath(srtfile).replace(":", "\\:")
     run([
@@ -82,6 +88,7 @@ def hardcode_sub(video, srtfile, outmp4):
         "-c:a","copy", outmp4
     ])
 
+# ===================== Upload Catbox =====================
 def upload_catbox(file):
     import requests
     url = "https://catbox.moe/user/api.php"
@@ -90,6 +97,7 @@ def upload_catbox(file):
     r.raise_for_status()
     return r.text.strip()
 
+# ===================== Main Flow =====================
 def process_video(url):
     base = os.path.splitext(os.path.basename(url))[0]
     print(f"\n🎬 Processing {base}")
@@ -100,7 +108,6 @@ def process_video(url):
     jpn_srt = f"{base}.srt"
     eng_srt = f"{base}_en.srt"
     outmp4 = f"{base}_sub.mp4"
-    txt_log = "uploaded_links.txt"
 
     download_video(url, mp4)
     extract_audio(mp4, wav, mp3)
@@ -111,10 +118,6 @@ def process_video(url):
 
     link = upload_catbox(outmp4)
     print(f"✅ Uploaded: {link}")
-
-    # Tulis TXT log dengan komentar nama video
-    with open(txt_log, "a", encoding="utf-8") as f:
-        f.write(f"Video: {base}\nLink: {link}\n\n")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
