@@ -1,12 +1,10 @@
-import os, sys, json, subprocess, srt, shutil
+import os, sys, json, subprocess, srt, shutil, time, requests
 from datetime import timedelta
 from groq import Groq  # pip install groq
-from googletrans import Translator  # pip install googletrans==4.0.0-rc1
 
 # ===================== API =====================
 API_KEY = "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"
 client = Groq(api_key=API_KEY)
-translator = Translator()
 
 # ===================== FFMPEG =====================
 def get_ffmpeg_path():
@@ -33,7 +31,6 @@ def extract_audio(video, out_wav, out_mp3):
 
 # ===================== Whisper (Groq) =====================
 def whisper_transcribe(audio, out_json):
-    import requests
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
     with open(audio, "rb") as f:
         r = requests.post(
@@ -61,20 +58,39 @@ def json_to_srt(json_file, out_srt):
         f.write(srt.compose(subs))
 
 # ===================== Google Translate =====================
-def translate_srt(in_srt, out_srt):
+def google_translate(text, source="ja", target="en"):
+    url = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": source,
+        "tl": target,
+        "dt": "t",
+        "q": text,
+    }
+    try:
+        resp = requests.get(url, params=params, timeout=10)
+        resp.raise_for_status()
+        result = resp.json()
+        return "".join([t[0] for t in result[0]])
+    except Exception as e:
+        print(f"❌ Translate error: {e}")
+        return text
+
+def translate_srt(in_srt, out_srt, delay=1.0):
     subs = list(srt.parse(open(in_srt, encoding="utf-8").read()))
     translated_subs = []
 
     for i, sub in enumerate(subs, start=1):
         try:
-            result = translator.translate(sub.content, src='ja', dest='en')
-            sub.content = result.text
+            sub.content = google_translate(sub.content, "ja", "en")
         except Exception as e:
             print(f"⚠️ Error at line {i}: {e}")
         translated_subs.append(sub)
 
         if i % 10 == 0:
             print(f"🔹 Translated {i}/{len(subs)} subtitles...")
+
+        time.sleep(delay)  # biar ga ke-limit
 
     with open(out_srt, "w", encoding="utf-8") as f:
         f.write(srt.compose(translated_subs))
@@ -90,7 +106,6 @@ def hardcode_sub(video, srtfile, outmp4):
 
 # ===================== Upload Catbox =====================
 def upload_catbox(file):
-    import requests
     url = "https://catbox.moe/user/api.php"
     with open(file, "rb") as f:
         r = requests.post(url, data={"reqtype":"fileupload"}, files={"fileToUpload":f})
@@ -98,7 +113,7 @@ def upload_catbox(file):
     return r.text.strip()
 
 # ===================== Main Flow =====================
-def process_video(url):
+def process_video(url, delay=1.0):
     base = os.path.splitext(os.path.basename(url))[0]
     print(f"\n🎬 Processing {base}")
     mp4 = f"{base}.mp4"
@@ -113,7 +128,7 @@ def process_video(url):
     extract_audio(mp4, wav, mp3)
     whisper_transcribe(mp3, jpn_json)
     json_to_srt(jpn_json, jpn_srt)
-    translate_srt(jpn_srt, eng_srt)
+    translate_srt(jpn_srt, eng_srt, delay=delay)
     hardcode_sub(mp4, eng_srt, outmp4)
 
     link = upload_catbox(outmp4)
@@ -121,11 +136,13 @@ def process_video(url):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python process.py video.txt")
+        print("Usage: python process.py video.txt [delay]")
         sys.exit(1)
+
+    delay = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 
     with open(sys.argv[1]) as f:
         for url in f:
             url = url.strip()
             if url:
-                process_video(url)
+                process_video(url, delay=delay)
