@@ -4,7 +4,7 @@ from groq import Groq  # pip install groq
 from googletrans import Translator  # pip install googletrans==4.0.0-rc1
 
 # ===================== API Key Groq =====================
-API_KEY = "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"
+API_KEY = "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"
 client = Groq(api_key=API_KEY)
 
 # ===================== FFMPEG =====================
